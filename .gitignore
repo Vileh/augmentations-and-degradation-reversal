@@ -1,3 +1,4 @@
 datasets/
 images/
 metadata/
+__pycache__/
