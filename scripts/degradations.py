@@ -112,6 +112,9 @@ class RandomMotionBlur(nn.Module):
         - y (torch.Tensor): Blurred tensor
         - m (torch.Tensor, optional): Blur kernel, if return_kernel is True
         """
+        if x.dim() == 3:
+            x = x.unsqueeze(0)
+            
         # Generate a random initial vector
         vector = torch.randn(x.shape[0], dtype=torch.cfloat) / 3
         vector.real /= 2
