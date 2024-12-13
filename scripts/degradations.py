@@ -25,122 +25,330 @@ class GaussianNoise(nn.Module):
     def __repr__(self):
         return f"{self.__class__.__name__}(mean={self.mean}, std={self.std}, p={self.p})"
 
-def random_motion(steps=16, initial_vector=None, alpha=0.2):
-    if initial_vector is None:
-        initial_vector = torch.randn(1, dtype=torch.cfloat)
+# def random_motion(steps=16, initial_vector=None, alpha=0.2):
+#     if initial_vector is None:
+#         initial_vector = torch.randn(1, dtype=torch.cfloat)
     
-    # Generate the random motion path
-    motion = [torch.zeros_like(initial_vector)]
-    for _ in range(steps):
-        change = torch.randn(initial_vector.shape[0], dtype=torch.cfloat)
-        initial_vector = initial_vector + change * alpha
-        initial_vector /= initial_vector.abs().add(1e-8)
-        motion.append(motion[-1] + initial_vector)
+#     # Generate the random motion path
+#     motion = [torch.zeros_like(initial_vector)]
+#     for _ in range(steps):
+#         change = torch.randn(initial_vector.shape[0], dtype=torch.cfloat)
+#         initial_vector = initial_vector + change * alpha
+#         initial_vector /= initial_vector.abs().add(1e-8)
+#         motion.append(motion[-1] + initial_vector)
     
-    motion = torch.stack(motion, -1)
+#     motion = torch.stack(motion, -1)
     
-    # Find bounding box
-    real_min, _ = motion.real.min(dim=-1, keepdim=True)
-    real_max, _ = motion.real.max(dim=-1, keepdim=True)
-    imag_min, _ = motion.imag.min(dim=-1, keepdim=True)
-    imag_max, _ = motion.imag.max(dim=-1, keepdim=True)
+#     # Find bounding box
+#     real_min, _ = motion.real.min(dim=-1, keepdim=True)
+#     real_max, _ = motion.real.max(dim=-1, keepdim=True)
+#     imag_min, _ = motion.imag.min(dim=-1, keepdim=True)
+#     imag_max, _ = motion.imag.max(dim=-1, keepdim=True)
 
-    # Scale motion to fit exactly in steps x steps
-    real_scale = (steps - 1) / (real_max - real_min)
-    imag_scale = (steps - 1) / (imag_max - imag_min)
-    scale = torch.min(real_scale, imag_scale)
+#     # Scale motion to fit exactly in steps x steps
+#     real_scale = (steps - 1) / (real_max - real_min)
+#     imag_scale = (steps - 1) / (imag_max - imag_min)
+#     scale = torch.min(real_scale, imag_scale)
     
-    real_shift = (steps - (real_max - real_min) * scale) / 2 - real_min * scale
-    imag_shift = (steps - (imag_max - imag_min) * scale) / 2 - imag_min * scale
+#     real_shift = (steps - (real_max - real_min) * scale) / 2 - real_min * scale
+#     imag_shift = (steps - (imag_max - imag_min) * scale) / 2 - imag_min * scale
     
-    scaled_motion = motion * scale + (real_shift + 1j * imag_shift)
+#     scaled_motion = motion * scale + (real_shift + 1j * imag_shift)
     
-    # Create kernel
-    kernel = torch.zeros(initial_vector.shape[0], 1, steps, steps)
+#     # Create kernel
+#     kernel = torch.zeros(initial_vector.shape[0], 1, steps, steps)
     
-    # Fill kernel
-    for s in range(steps + 1):
-        v = scaled_motion[:, s]
-        x = torch.clamp(v.real, 0, steps - 1)
-        y = torch.clamp(v.imag, 0, steps - 1)
+#     # Fill kernel
+#     for s in range(steps + 1):
+#         v = scaled_motion[:, s]
+#         x = torch.clamp(v.real, 0, steps - 1)
+#         y = torch.clamp(v.imag, 0, steps - 1)
         
-        ix = x.long()
-        iy = y.long()
+#         ix = x.long()
+#         iy = y.long()
         
-        vx = x - ix.float()
-        vy = y - iy.float()
+#         vx = x - ix.float()
+#         vy = y - iy.float()
         
-        for i in range(initial_vector.shape[0]):
-            kernel[i, 0, iy[i], ix[i]] += (1-vx[i]) * (1-vy[i]) / steps
-            if ix[i] + 1 < steps:
-                kernel[i, 0, iy[i], ix[i]+1] += vx[i] * (1-vy[i]) / steps
-            if iy[i] + 1 < steps:
-                kernel[i, 0, iy[i]+1, ix[i]] += (1-vx[i]) * vy[i] / steps
-            if ix[i] + 1 < steps and iy[i] + 1 < steps:
-                kernel[i, 0, iy[i]+1, ix[i]+1] += vx[i] * vy[i] / steps
+#         for i in range(initial_vector.shape[0]):
+#             kernel[i, 0, iy[i], ix[i]] += (1-vx[i]) * (1-vy[i]) / steps
+#             if ix[i] + 1 < steps:
+#                 kernel[i, 0, iy[i], ix[i]+1] += vx[i] * (1-vy[i]) / steps
+#             if iy[i] + 1 < steps:
+#                 kernel[i, 0, iy[i]+1, ix[i]] += (1-vx[i]) * vy[i] / steps
+#             if ix[i] + 1 < steps and iy[i] + 1 < steps:
+#                 kernel[i, 0, iy[i]+1, ix[i]+1] += vx[i] * vy[i] / steps
 
-    # Normalize the kernel
-    kernel /= kernel.sum(dim=(-1, -2), keepdim=True)
+#     # Normalize the kernel
+#     kernel /= kernel.sum(dim=(-1, -2), keepdim=True)
     
-    return kernel
+#     return kernel
 
+# class RandomMotionBlur(nn.Module):
+#     """
+#     Apply random motion blur to input tensors.
+#     """
+#     def __init__(self, steps=17, alpha=0.2):
+#         """
+#         Initialize the RandomMotionBlur module.
+        
+#         Args:
+#         - steps (int): Number of steps in the motion path
+#         - alpha (float): Controls the randomness of the motion path
+#         """
+#         super().__init__()
+#         self.steps = steps
+#         self.alpha = alpha
+       
+#     def forward(self, x, return_kernel=False):
+#         """
+#         Apply random motion blur to the input tensor.
+        
+#         Args:
+#         - x (torch.Tensor): Input tensor to be blurred
+#         - return_kernel (bool): If True, return both blurred tensor and kernel
+        
+#         Returns:
+#         - y (torch.Tensor): Blurred tensor
+#         - m (torch.Tensor, optional): Blur kernel, if return_kernel is True
+#         """
+#         dim_3 = False
+#         if x.dim() == 3:
+#             dim_3 = True
+#             x = x.unsqueeze(0)
+
+#         # Generate a random initial vector
+#         vector = torch.randn(x.shape[0], dtype=torch.cfloat) / 3
+#         vector.real /= 2
+        
+#         # Create the motion blur kernel
+#         m = random_motion(self.steps, vector, alpha=self.alpha)
+        
+#         # Pad the input tensor for convolution
+#         xpad = [m.shape[-1]//2+1] * 2 + [m.shape[-2]//2+1] * 2
+#         x = F.pad(x, xpad)
+        
+#         # Pad the kernel to match input size
+#         mpad = [0, x.shape[-1]-m.shape[-1], 0, x.shape[-2]-m.shape[-2]]
+#         mp = F.pad(m, mpad)
+        
+#         # Apply blur in the frequency domain
+#         fx = torch.fft.fft2(x)  # FFT of input
+#         fm = torch.fft.fft2(mp)  # FFT of kernel
+#         fy = fx * fm  # Multiplication in frequency domain
+#         y = torch.fft.ifft2(fy).real  # Inverse FFT to get blurred result
+        
+#         # Crop the result to original size
+#         y = y[...,xpad[2]:-xpad[3], xpad[0]:-xpad[1]]
+
+#         if dim_3:
+#             y = y.squeeze(0)
+        
+#         return y if not return_kernel else (y, m)
+    
 class RandomMotionBlur(nn.Module):
     """
-    Apply random motion blur to input tensors.
+    Apply random motion blur to input tensors using convolution.
     """
-    def __init__(self, steps=17, alpha=0.2):
+    def __init__(self, ks=17, alpha=0.2):
         """
         Initialize the RandomMotionBlur module.
         
         Args:
-        - steps (int): Number of steps in the motion path
+        - ks (int): Kernel size = number of steps in the motion path
         - alpha (float): Controls the randomness of the motion path
         """
         super().__init__()
-        self.steps = steps
+        self.ks = ks
         self.alpha = alpha
-       
+    
+    def _generate_motion_kernel(self, initial_vector=None, alpha=0.2):
+        if initial_vector is None:
+            initial_vector = torch.randn(1, dtype=torch.cfloat)
+        
+        # Generate the random motion path
+        motion = [torch.zeros_like(initial_vector)]
+        for _ in range(self.ks):
+            change = torch.randn(initial_vector.shape[0], dtype=torch.cfloat)
+            initial_vector = initial_vector + change * alpha
+            initial_vector /= initial_vector.abs().add(1e-8)
+            motion.append(motion[-1] + initial_vector)
+        
+        motion = torch.stack(motion, -1)
+        
+        # Find bounding box
+        real_min, _ = motion.real.min(dim=-1, keepdim=True)
+        real_max, _ = motion.real.max(dim=-1, keepdim=True)
+        imag_min, _ = motion.imag.min(dim=-1, keepdim=True)
+        imag_max, _ = motion.imag.max(dim=-1, keepdim=True)
+
+        # Scale motion to fit exactly in steps x steps
+        real_scale = (self.ks - 1) / (real_max - real_min)
+        imag_scale = (self.ks - 1) / (imag_max - imag_min)
+        scale = torch.min(real_scale, imag_scale)
+        
+        real_shift = (self.ks - (real_max - real_min) * scale) / 2 - real_min * scale
+        imag_shift = (self.ks - (imag_max - imag_min) * scale) / 2 - imag_min * scale
+        
+        scaled_motion = motion * scale + (real_shift + 1j * imag_shift)
+        
+        # Create kernel
+        kernel = torch.zeros(initial_vector.shape[0], 1, self.ks, self.ks)
+        
+        # Fill kernel
+        for s in range(self.ks + 1):
+            v = scaled_motion[:, s]
+            x = torch.clamp(v.real, 0, self.ks - 1)
+            y = torch.clamp(v.imag, 0, self.ks - 1)
+            
+            ix = x.long()
+            iy = y.long()
+            
+            vx = x - ix.float()
+            vy = y - iy.float()
+            
+            for i in range(initial_vector.shape[0]):
+                kernel[i, 0, iy[i], ix[i]] += (1-vx[i]) * (1-vy[i]) / self.ks
+                if ix[i] + 1 < self.ks:
+                    kernel[i, 0, iy[i], ix[i]+1] += vx[i] * (1-vy[i]) / self.ks
+                if iy[i] + 1 < self.ks:
+                    kernel[i, 0, iy[i]+1, ix[i]] += (1-vx[i]) * vy[i] / self.ks
+                if ix[i] + 1 < self.ks and iy[i] + 1 < self.ks:
+                    kernel[i, 0, iy[i]+1, ix[i]+1] += vx[i] * vy[i] / self.ks
+
+        # Normalize the kernel
+        kernel /= kernel.sum(dim=(-1, -2), keepdim=True)
+        
+        return kernel
+    
     def forward(self, x, return_kernel=False):
         """
-        Apply random motion blur to the input tensor.
+        Apply random motion blur to the input tensor using convolution.
         
         Args:
-        - x (torch.Tensor): Input tensor to be blurred
+        - x (torch.Tensor): Input tensor to be blurred [B,C,H,W] or [C,H,W]
         - return_kernel (bool): If True, return both blurred tensor and kernel
         
         Returns:
         - y (torch.Tensor): Blurred tensor
-        - m (torch.Tensor, optional): Blur kernel, if return_kernel is True
+        - kernel (torch.Tensor, optional): Blur kernel, if return_kernel is True
         """
+        dim_3 = False
         if x.dim() == 3:
             dim_3 = True
             x = x.unsqueeze(0)
-
-        # Generate a random initial vector
-        vector = torch.randn(x.shape[0], dtype=torch.cfloat) / 3
+        
+        batch_size = x.shape[0]
+        
+        # Generate initial vector and kernel
+        vector = torch.randn(batch_size, dtype=torch.cfloat, device=x.device) / 3
         vector.real /= 2
-        
-        # Create the motion blur kernel
-        m = random_motion(self.steps, vector, alpha=self.alpha)
-        
-        # Pad the input tensor for convolution
-        xpad = [m.shape[-1]//2+1] * 2 + [m.shape[-2]//2+1] * 2
-        x = F.pad(x, xpad)
-        
-        # Pad the kernel to match input size
-        mpad = [0, x.shape[-1]-m.shape[-1], 0, x.shape[-2]-m.shape[-2]]
-        mp = F.pad(m, mpad)
-        
-        # Apply blur in the frequency domain
-        fx = torch.fft.fft2(x)  # FFT of input
-        fm = torch.fft.fft2(mp)  # FFT of kernel
-        fy = fx * fm  # Multiplication in frequency domain
-        y = torch.fft.ifft2(fy).real  # Inverse FFT to get blurred result
-        
-        # Crop the result to original size
-        y = y[...,xpad[2]:-xpad[3], xpad[0]:-xpad[1]]
+        kernel = self._generate_motion_kernel(initial_vector=vector, alpha=self.alpha)
 
+        # Replicate kernel for each input channel
+        kernel = kernel.repeat(3, 1, 1, 1) #repeat(1, x.shape[1], 1, 1)
+
+        # Apply convolution
+        padding = (self.ks // 2, self.ks // 2)
+        y = F.conv2d(
+            input=x,
+            weight=kernel,
+            padding=padding,
+            groups=3
+        )
+        
         if dim_3:
             y = y.squeeze(0)
+            kernel = kernel.squeeze(0)
         
-        return y if not return_kernel else (y, m)
+        return y if not return_kernel else (y, kernel)
+    
+class CircularPSFBlur(nn.Module):
+    """
+    Apply out of focus blur using circular PSF convolution.
+    """
+    def __init__(self, kernel_size=13, radius=None):
+        """
+        Initialize the CircularPSFBlur module.
+        
+        Args:
+        - kernel_size (int): Size of the PSF kernel
+        - radius (float, optional): Radius of the circular PSF. If None, uses 40% of kernel_size
+        """
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.radius = radius if radius is not None else 0.4 * kernel_size
+    
+    def _generate_circular_psf(self, batch_size=1):
+        """
+        Generate circular PSF kernel.
+        
+        Args:
+        - batch_size (int): Number of kernels to generate
+        
+        Returns:
+        - kernel (torch.Tensor): Circular PSF kernel
+        """
+        # Create coordinate grids
+        x = torch.linspace(-self.kernel_size/2, self.kernel_size/2, self.kernel_size)
+        y = torch.linspace(-self.kernel_size/2, self.kernel_size/2, self.kernel_size)
+        x_grid, y_grid = torch.meshgrid(x, y, indexing='xy')
+        
+        # Create circular mask
+        radius_map = torch.sqrt(x_grid**2 + y_grid**2)
+        kernel = (radius_map <= self.radius).float()
+        
+        # Optional: Smooth the edges slightly for more realistic blur
+        sigma = 0.5
+        if sigma > 0:
+            kernel = torch.exp(-((radius_map - self.radius)**2) / (2 * sigma**2))
+            kernel = kernel * (radius_map <= (self.radius + 2*sigma)).float()
+        
+        # Normalize the kernel
+        kernel = kernel / kernel.sum()
+        
+        # Add batch and channel dimensions
+        kernel = kernel.view(1, 1, self.kernel_size, self.kernel_size)
+        kernel = kernel.repeat(batch_size, 1, 1, 1)
+        
+        return kernel
+    
+    def forward(self, x, return_kernel=False):
+        """
+        Apply out of focus blur to the input tensor using convolution.
+        
+        Args:
+        - x (torch.Tensor): Input tensor to be blurred [B,C,H,W] or [C,H,W]
+        - return_kernel (bool): If True, return both blurred tensor and kernel
+        
+        Returns:
+        - y (torch.Tensor): Blurred tensor
+        - kernel (torch.Tensor, optional): Blur kernel, if return_kernel is True
+        """
+        dim_3 = False
+        if x.dim() == 3:
+            dim_3 = True
+            x = x.unsqueeze(0)
+        
+        batch_size = x.shape[0]
+        
+        # Generate kernel
+        kernel = self._generate_circular_psf(batch_size).to(x.device)
+        
+        # Replicate kernel for each input channel (RGB)
+        kernel = kernel.repeat(3, 1, 1, 1)
+        
+        # Apply convolution
+        padding = (self.kernel_size // 2, self.kernel_size // 2)
+        y = F.conv2d(
+            input=x,
+            weight=kernel,
+            padding=padding,
+            groups=3  # Process each channel independently
+        )
+        
+        if dim_3:
+            y = y.squeeze(0)
+            kernel = kernel.squeeze(0)
+        
+        return y if not return_kernel else (y, kernel)
