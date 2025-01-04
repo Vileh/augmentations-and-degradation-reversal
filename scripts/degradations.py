@@ -234,6 +234,120 @@ class CircularPSFBlur(nn.Module):
             kernel = kernel.squeeze(0)
         
         return y if not return_kernel else (y, kernel)
+
+class GGPSFBlur(nn.Module):
+    """
+    Apply out of focus blur using Generalized Gamma PSF convolution.
+    """
+    def __init__(self, kernel_size=13, beta=None, alpha=None):
+        """
+        Initialize the GGPSFBlur module.
+        
+        Args:
+        - kernel_size (int): Size of the PSF kernel
+        - beta (float, optional): Beta parameter of the GG function
+        - alpha (float, optional): Alpha parameter of the GG function. 
+                                 If None, computed as max(2, 1.033*beta - 0.6217)
+        """
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.beta = beta if beta is not None else 2.0
+        self.alpha = alpha if alpha is not None else max(2.0, 1.033 * self.beta - 0.6217)
+    
+    def generate_gg_psf(self, batch_size=1):
+        """
+        Generate Generalized Gamma PSF kernel.
+        
+        Args:
+        - batch_size (int): Number of kernels to generate
+        
+        Returns:
+        - kernel (torch.Tensor): GG PSF kernel
+        """
+        # Create coordinate grids
+        x = torch.linspace(-self.kernel_size/2, self.kernel_size/2, self.kernel_size)
+        y = torch.linspace(-self.kernel_size/2, self.kernel_size/2, self.kernel_size)
+        x_grid, y_grid = torch.meshgrid(x, y, indexing='xy')
+        
+        # Calculate radial distance
+        r = torch.sqrt(x_grid**2 + y_grid**2)
+        
+        # Normalize radius to [0, 1] range
+        r = r / r.max()
+        
+        # Generate GG PSF
+        # Using the formula: f(r) = r^(α-1) * exp(-(r/β))
+        kernel = (r ** (self.alpha - 1)) * torch.exp(-(r / self.beta))
+        
+        # Handle potential numerical instabilities
+        kernel = torch.nan_to_num(kernel, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # Normalize the kernel
+        kernel = kernel / kernel.sum()
+        
+        # Add batch and channel dimensions
+        kernel = kernel.view(1, 1, self.kernel_size, self.kernel_size)
+        kernel = kernel.repeat(batch_size, 1, 1, 1)
+        
+        return kernel
+    
+    def forward(self, x, return_kernel=False):
+        """
+        Apply out of focus blur to the input tensor using convolution.
+        
+        Args:
+        - x (torch.Tensor): Input tensor to be blurred [B,C,H,W] or [C,H,W]
+        - return_kernel (bool): If True, return both blurred tensor and kernel
+        
+        Returns:
+        - y (torch.Tensor): Blurred tensor
+        - kernel (torch.Tensor, optional): Blur kernel, if return_kernel is True
+        """
+        dim_3 = False
+        if x.dim() == 3:
+            dim_3 = True
+            x = x.unsqueeze(0)
+        
+        batch_size = x.shape[0]
+        
+        # Generate kernel
+        kernel = self.generate_gg_psf(batch_size).to(x.device)
+        
+        # Replicate kernel for each input channel
+        kernel = kernel.repeat(3, 1, 1, 1)
+        
+        # Apply convolution
+        padding = (self.kernel_size // 2, self.kernel_size // 2)
+        y = F.conv2d(
+            input=x,
+            weight=kernel,
+            padding=padding,
+            groups=3  # Process each channel independently
+        )
+        
+        if dim_3:
+            y = y.squeeze(0)
+            kernel = kernel.squeeze(0)
+        
+        return y if not return_kernel else (y, kernel)
+
+    @property
+    def beta(self):
+        return self._beta
+    
+    @beta.setter
+    def beta(self, value):
+        self._beta = value
+        if not hasattr(self, '_alpha') or self._alpha is None:
+            self._alpha = max(2.0, 1.033 * value - 0.6217)
+    
+    @property
+    def alpha(self):
+        return self._alpha
+    
+    @alpha.setter
+    def alpha(self, value):
+        self._alpha = value
     
 class JPEGArtifacts(nn.Module):
     """Add JPEG compression artifacts to tensor images.
