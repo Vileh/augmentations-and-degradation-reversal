@@ -1,6 +1,8 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 from PIL import Image
 from io import BytesIO
@@ -131,11 +133,10 @@ class RandomMotionBlur(nn.Module):
         kernel = kernel.repeat(3, 1, 1, 1) #repeat(1, x.shape[1], 1, 1)
 
         # Apply convolution
-        padding = (self.ks // 2, self.ks // 2)
         y = F.conv2d(
             input=x,
             weight=kernel,
-            padding=padding,
+            padding='same',
             groups=3
         )
         
@@ -378,3 +379,118 @@ class JPEGArtifacts(nn.Module):
         
     def __repr__(self):
         return f"{self.__class__.__name__}(quality={self.quality}, p={self.p})"
+
+
+class RandomDegradation(nn.Module):
+    def __init__(self, funcs=None, param_ranges=None, secondary_params=None, probs=None):
+        super().__init__()
+        
+        # Default degradations with their configurations
+        self.available_degradations = {
+            'no_degradation': {
+                'class': lambda x: x,
+                'param_range': [None],
+                'secondary_param': None
+            },
+            'gaussian_blur': {
+                'class': T.GaussianBlur,
+                'param_range': np.arange(3, 18, 2),
+                'secondary_param': 10
+            },
+            'motion_blur': {
+                'class': RandomMotionBlur,
+                'param_range': np.arange(3, 18, 2),
+                'secondary_param': 0.2
+            },
+            'out_of_focus_blur': {
+                'class': GGPSFBlur,
+                'param_range': np.arange(3, 18, 2),
+                'secondary_param': 0.5
+            },
+            'jpeg_artifacts': {
+                'class': JPEGArtifacts,
+                'param_range': np.linspace(99, 5, 95),
+                'secondary_param': None
+            }
+        }
+        
+        # If no specific functions are requested, use all available
+        if funcs is None:
+            funcs = list(self.available_degradations.keys())
+        
+        # Validate requested functions
+        for func in funcs:
+            if func not in self.available_degradations:
+                raise ValueError(f"Unknown degradation function: {func}")
+        
+        # Initialize selected degradations with custom parameters if provided
+        self.selected_degradations = []
+        for i, func in enumerate(funcs):
+            deg_config = self.available_degradations[func].copy()
+            
+            # Override param_range if provided (skip for no_degradation)
+            if param_ranges is not None and i < len(param_ranges) and func != 'no_degradation':
+                deg_config['param_range'] = param_ranges[i]
+                
+            # Override secondary_param if provided (skip for no_degradation)
+            if secondary_params is not None and i < len(secondary_params) and func != 'no_degradation':
+                deg_config['secondary_param'] = secondary_params[i]
+            
+            self.selected_degradations.append({
+                'name': func,
+                'config': deg_config
+            })
+        
+        # Set probabilities for each degradation
+        if probs is None:
+            # Equal probability for each degradation
+            self.probs = [1.0 / len(self.selected_degradations)] * len(self.selected_degradations)
+        else:
+            if len(probs) != len(self.selected_degradations):
+                raise ValueError("Number of probabilities must match number of selected degradations")
+            if not np.isclose(sum(probs), 1.0):
+                raise ValueError("Probabilities must sum to 1")
+            self.probs = probs
+        
+        # Initialize degradation transforms
+        self.transforms = []
+        for deg in self.selected_degradations:
+            config = deg['config']
+            if deg['name'] == 'no_degradation':
+                transform = config['class']  # Already a lambda function
+            elif config['secondary_param'] is not None:
+                transform = config['class'](config['param_range'][0], config['secondary_param'])
+            else:
+                transform = config['class'](config['param_range'][0])
+            self.transforms.append(transform)
+
+    def forward(self, image):
+        # Randomly select a degradation based on probabilities
+        degradation_idx = np.random.choice(len(self.transforms), p=self.probs)
+        selected_deg = self.selected_degradations[degradation_idx]
+        transform = self.transforms[degradation_idx]
+        
+        # If no degradation is selected, return original image
+        if selected_deg['name'] == 'no_degradation':
+            return image
+        
+        # Randomly select a parameter from the parameter range
+        param_range = selected_deg['config']['param_range']
+        param = np.random.choice(param_range)
+        secondary_param = selected_deg['config']['secondary_param']
+        
+        # Update the transform's parameter
+        if selected_deg['name'] == 'gaussian_blur':
+            transform.kernel_size = int(param)
+            transform.sigma = (secondary_param, secondary_param)
+        elif selected_deg['name'] == 'motion_blur':
+            transform.kernel_size = int(param)
+            transform.alpha = secondary_param
+        elif selected_deg['name'] == 'out_of_focus_blur':
+            transform.kernel_size = int(param)
+            transform.beta = secondary_param
+        elif selected_deg['name'] == 'jpeg_artifacts':
+            transform.quality = int(param)
+        
+        # Apply the transform
+        return transform(image)
